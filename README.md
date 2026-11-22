@@ -30,6 +30,10 @@ Use **Portal ayarları** for the portal and program names. Select a week or less
 
 Live changes are saved in Supabase and visible to students when they open or refresh the portal. Demo edits reset on reload.
 
+## Student first-login passwords
+
+Run `backend/require-student-password-change.sql` after the other database setup scripts. Students must replace their initial password before they can read assignments or use submission storage. Mentors keep their existing sign-in flow. This applies to current student accounts and to new student roster entries.
+
 ## Publish on GitHub Pages
 
 Create a GitHub repository and commit `docs/`, `backend/` and this README. In **Settings → Pages**, choose **Deploy from a branch**, then select `main` and `/docs`. The Day 1 slide deck is a public static asset on a standard GitHub Pages site. Student records and files are stored in Supabase. Keep the original Kahoot workbook with mentor materials because it contains the answer key.

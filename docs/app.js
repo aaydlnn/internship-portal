@@ -9,6 +9,7 @@ let submissions = [];
 let details = new Map();
 let viewRequest = 0;
 let signInReady = false;
+let mustChangePassword = false;
 const samples = new Map();
 const mimeTypes = ['application/pdf','image/jpeg','image/png'];
 const dateFormat = new Intl.DateTimeFormat('az-AZ', {
@@ -77,7 +78,7 @@ function check(result, message) {
 async function refresh() {
   const request = ++viewRequest;
   if (api) {
-    const member = user && !rosterMissing;
+    const member = user && !rosterMissing && !mustChangePassword;
     const [detailResult, taskResult, submissionResult] = await Promise.all([
       api.from('site_details').select('*'),
       member ? api.from('tasks').select('*').order('created_at').order('id') : null,
@@ -107,11 +108,13 @@ async function loadAccount(sessionUser) {
   details.clear();
   mentor = false;
   rosterMissing = Boolean(sessionUser);
+  mustChangePassword = false;
   if (sessionUser) {
-    const member = check(await api.from('members').select('role').eq('id', sessionUser.id).maybeSingle(), 'Hesaba giriş yoxlanmadı.');
+    const member = check(await api.from('members').select('role,must_change_password').eq('id', sessionUser.id).maybeSingle(), 'Hesaba giriş yoxlanmadı.');
     if (user !== sessionUser) return;
     mentor = member?.role === 'mentor';
     rosterMissing = !member;
+    mustChangePassword = member?.role === 'student' && member.must_change_password;
   }
   await refresh();
 }
@@ -151,7 +154,7 @@ function render() {
   $('portal-name').textContent = portal.title;
   $('program-name').textContent = portal.subtitle;
   document.title = [portal.subtitle, portal.title].filter(Boolean).join(' · ');
-  const canViewPortal = demo || Boolean(user && !rosterMissing);
+  const canViewPortal = demo || Boolean(user && !rosterMissing && !mustChangePassword);
   $('portal-layout').hidden = !canViewPortal;
   $('login-screen').hidden = canViewPortal;
   $('login-brand').textContent = document.title;
@@ -416,23 +419,50 @@ async function signOut() {
   await loadAccount(null);
 }
 
+function signOutButton() {
+  return button('Çıxış', async () => {
+    try {
+      await signOut();
+    } catch (error) {
+      $('login-status').textContent = error.message;
+    }
+  }, 'quiet');
+}
+
 function renderSignIn() {
   const container = $('login-form');
+  $('login-title').textContent = mustChangePassword ? 'Müvəqqəti parolu dəyiş' : 'Portala daxil ol';
+  if (mustChangePassword) {
+    if (container.firstElementChild?.id === 'password-change-form') return;
+    $('login-status').textContent = 'Dərslərə keçmək üçün yeni parol seç. Parol ən azı 12 simvol olmalıdır.';
+    const change = form([
+      field('Yeni parol', 'password', 'password', { required: true, minLength: 12, autocomplete: 'new-password' }),
+      field('Yeni parolu təsdiqlə', 'confirmation', 'password', { required: true, minLength: 12, autocomplete: 'new-password' })
+    ], 'Parolu dəyiş', async data => {
+      const password = data.get('password');
+      if (password !== data.get('confirmation')) throw new Error('Parollar eyni olmalıdır.');
+      if (password.length < 12 || new TextEncoder().encode(password).length > 72) {
+        throw new Error('Parol ən azı 12 simvol və ən çoxu 72 bayt olmalıdır.');
+      }
+      const result = await api.auth.updateUser({ password });
+      if (result.error?.code === 'same_password') throw new Error('Müvəqqəti paroldan fərqli parol seç.');
+      const updated = check(result, 'Parol dəyişmədi. Yeni parol seç və yenidən cəhd et.');
+      await loadAccount(updated.user);
+      if (mustChangePassword) throw new Error('Parol yeniləndi, amma giriş hələ təsdiqlənməyib. Yenidən daxil ol.');
+    }, false);
+    change.id = 'password-change-form';
+    container.replaceChildren(change, signOutButton());
+    return;
+  }
   if (rosterMissing) {
     $('login-status').textContent = 'Bu hesab proqram siyahısında yoxdur. Mentorla əlaqə saxla.';
-    container.replaceChildren(button('Çıxış', async () => {
-      try {
-        await signOut();
-      } catch (error) {
-        $('login-status').textContent = error.message;
-      }
-    }));
+    container.replaceChildren(signOutButton());
     return;
   }
   if (!signInReady) return;
-  if (container.firstElementChild?.tagName === 'FORM') return;
+  if (container.firstElementChild?.id === 'email-sign-in-form') return;
   $('login-status').textContent = '';
-  container.replaceChildren(form([
+  const login = form([
     field('E-poçt', 'email', 'email', { required: true, autocomplete: 'username' }),
     field('Parol', 'password', 'password', { required: true, autocomplete: 'current-password' })
   ], 'Daxil ol', async data => {
@@ -440,7 +470,9 @@ function renderSignIn() {
       email: data.get('email').trim(), password: data.get('password')
     }), 'Giriş alınmadı. E-poçt və parolu yoxla.');
     await loadAccount(result.user);
-  }, false));
+  }, false);
+  login.id = 'email-sign-in-form';
+  container.replaceChildren(login);
 }
 
 $('account').onclick = async () => {

@@ -55,3 +55,5 @@ textarea{resize:vertical;min-height:105px}.form-error{color:#9a2735}.form-error:
 .sidebar .brand{align-items:flex-start;flex-direction:column;gap:12px}
 .sidebar .academy-logo{width:100%;background:#fff;border-radius:8px;padding:9px}
 @media(max-width:610px){.sidebar .brand{flex-direction:row;align-items:center;flex-wrap:wrap}.sidebar .academy-logo{width:min(100%,168px)}}
+
+#password-change-form+.quiet{margin-top:10px}
