@@ -8,6 +8,7 @@ let tasks = demo ? [...initialTasks] : [];
 let submissions = [];
 let details = new Map();
 let viewRequest = 0;
+let signInReady = false;
 const samples = new Map();
 const mimeTypes = ['application/pdf','image/jpeg','image/png'];
 const dateFormat = new Intl.DateTimeFormat('az-AZ', {
@@ -45,7 +46,7 @@ function field(label, name, type = 'text', options = {}) {
   return wrapper;
 }
 
-function form(fields, action, onSubmit) {
+function form(fields, action, onSubmit, closeDialog = true) {
   const node = element('form');
   const submit = element('button', action);
   const status = element('p', '', 'form-error');
@@ -58,7 +59,7 @@ function form(fields, action, onSubmit) {
     status.textContent = '';
     try {
       await onSubmit(new FormData(node));
-      if (node.isConnected) $('modal').close();
+      if (closeDialog && node.isConnected) $('modal').close();
     } catch (error) {
       status.textContent = error instanceof Error ? error.message : 'Əməliyyat alınmadı. Yenidən cəhd et.';
     } finally {
@@ -92,7 +93,10 @@ async function refresh() {
 }
 
 function updateView() {
-  refresh().catch(error => { $('notice').textContent = error.message; });
+  refresh().catch(error => {
+    const target = $('portal-layout').hidden ? 'login-status' : 'notice';
+    $(target).textContent = error.message;
+  });
 }
 
 async function loadAccount(sessionUser) {
@@ -102,7 +106,7 @@ async function loadAccount(sessionUser) {
   submissions = [];
   details.clear();
   mentor = false;
-  rosterMissing = false;
+  rosterMissing = Boolean(sessionUser);
   if (sessionUser) {
     const member = check(await api.from('members').select('role').eq('id', sessionUser.id).maybeSingle(), 'Hesaba giriş yoxlanmadı.');
     if (user !== sessionUser) return;
@@ -147,6 +151,12 @@ function render() {
   $('portal-name').textContent = portal.title;
   $('program-name').textContent = portal.subtitle;
   document.title = [portal.subtitle, portal.title].filter(Boolean).join(' · ');
+  const canViewPortal = demo || Boolean(user && !rosterMissing);
+  $('portal-layout').hidden = !canViewPortal;
+  $('login-screen').hidden = canViewPortal;
+  $('login-brand').textContent = document.title;
+  if (!canViewPortal) renderSignIn();
+  else $('login-form').replaceChildren();
   const info = lessonDetails(week, lesson);
   const external = info.material_hidden ? '' : materialUrl(info.material_url);
   const slides = !info.material_hidden && !external && week === 1 && lesson === 1;
@@ -401,27 +411,48 @@ function taskEditor(existing) {
 }
 
 $('new-task').onclick = () => taskEditor();
+async function signOut() {
+  check(await api.auth.signOut(), 'Hesabdan çıxmaq mümkün olmadı.');
+  await loadAccount(null);
+}
+
+function renderSignIn() {
+  const container = $('login-form');
+  if (rosterMissing) {
+    $('login-status').textContent = 'Bu hesab proqram siyahısında yoxdur. Mentorla əlaqə saxla.';
+    container.replaceChildren(button('Çıxış', async () => {
+      try {
+        await signOut();
+      } catch (error) {
+        $('login-status').textContent = error.message;
+      }
+    }));
+    return;
+  }
+  if (!signInReady) return;
+  if (container.firstElementChild?.tagName === 'FORM') return;
+  $('login-status').textContent = '';
+  container.replaceChildren(form([
+    field('E-poçt', 'email', 'email', { required: true, autocomplete: 'username' }),
+    field('Parol', 'password', 'password', { required: true, autocomplete: 'current-password' })
+  ], 'Daxil ol', async data => {
+    const result = check(await api.auth.signInWithPassword({
+      email: data.get('email').trim(), password: data.get('password')
+    }), 'Giriş alınmadı. E-poçt və parolu yoxla.');
+    await loadAccount(result.user);
+  }, false));
+}
+
 $('account').onclick = async () => {
   if (demo) {
     mentor = !mentor;
     render();
-  } else if (user) {
-    try {
-      check(await api.auth.signOut(), 'Hesabdan çıxmaq mümkün olmadı.');
-      await loadAccount(null);
-    } catch (error) {
-      $('notice').textContent = error.message;
-    }
-  } else if (api) {
-    show('Portala daxil ol', form([
-      field('E-poçt', 'email', 'email', { required: true, autocomplete: 'username' }),
-      field('Parol', 'password', 'password', { required: true, autocomplete: 'current-password' })
-    ], 'Daxil ol', async data => {
-      const result = check(await api.auth.signInWithPassword({
-        email: data.get('email').trim(), password: data.get('password')
-      }), 'Giriş alınmadı. E-poçt və parolu yoxla.');
-      await loadAccount(result.user);
-    }));
+    return;
+  }
+  try {
+    await signOut();
+  } catch (error) {
+    $('notice').textContent = error.message;
   }
 };
 
@@ -444,9 +475,11 @@ if (!demo) {
     api = createClient(config.url, config.publishableKey);
     const { session } = check(await api.auth.getSession(), 'Giriş vəziyyəti yoxlanmadı.');
     await loadAccount(session?.user || null);
+    signInReady = true;
+    render();
     window.addEventListener('focus', updateView);
   } catch {
-    $('notice').textContent = 'Portalın bağlantısı qurulmadı. Mentorla əlaqə saxla.';
+    $('login-status').textContent = 'Portalın bağlantısı qurulmadı. Səhifəni yenilə və yenidən cəhd et.';
   } finally {
     $('account').disabled = false;
   }

@@ -45,3 +45,8 @@ textarea{resize:vertical;min-height:105px}.form-error{color:#9a2735}.form-error:
 @media(max-width:610px){.layout{display:block}.sidebar{padding:14px 15px;gap:13px}.sidebar h2,.program-length{display:none}#weeks{grid-template-columns:repeat(3,minmax(0,1fr));gap:3px}.week{justify-content:center}.week small{display:none}.bar{min-height:58px}main{padding-top:14px}.hero{min-height:178px}.hero-content{max-width:94%}.motif{opacity:.26;right:-30px}.lesson-choice{flex-direction:column;align-items:flex-start;gap:3px}.lesson-switch{margin-bottom:17px}.content-grid{gap:16px}}
 .editor{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.editor button{background:white;border-color:var(--border)}.brand>span:last-child,.week>span,.lesson-choice>span,.panel h3,.hero h1,.hero p,#breadcrumb{overflow-wrap:anywhere;min-width:0}.week small{flex:none}.lesson-choice small{flex:none}.panel .material-link{justify-self:start;padding:8px 12px;border-radius:9px;font-weight:680;text-decoration:none}.material-link:focus-visible{outline:3px solid #3397e9;outline-offset:3px}.checkbox{display:flex;align-items:center;gap:9px}.checkbox input{width:auto}.hero p{white-space:pre-wrap}
 @media(max-width:610px){.week{padding-inline:6px}.editor button{font-size:.875rem}}
+
+.login-screen{min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at 80% 15%,#c9e7e2,transparent 43%),var(--paper)}
+.login-card{width:min(100%,420px);display:grid;gap:14px;background:#fff;border:1px solid var(--border);border-radius:20px;padding:clamp(22px,6vw,34px);box-shadow:0 16px 44px #16263b12}
+.login-card h1{font-size:1.9rem;line-height:1.15;letter-spacing:-.035em}
+.login-card #login-status:empty,.login-card #login-form:empty{display:none}

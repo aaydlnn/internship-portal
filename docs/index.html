@@ -9,8 +9,17 @@
 <script type="module" src="app.js"></script>
 </head>
 <body>
+<section id="login-screen" class="login-screen" aria-labelledby="login-title">
+  <div class="login-card">
+    <span class="mark" aria-hidden="true">K</span>
+    <h1 id="login-title">Portala daxil ol</h1>
+    <p id="login-brand">Kibertəhlükəsizlik · Təcrübə portalı</p>
+    <p id="login-status" role="status">Portal yüklənir…</p>
+    <div id="login-form"></div>
+  </div>
+</section>
+<div id="portal-layout" class="layout" hidden>
 <a class="skip" href="#main">Əsas məzmuna keç</a>
-<div class="layout">
 <aside class="sidebar">
   <a class="brand" href="#main"><span class="mark" aria-hidden="true">K</span><span><span id="portal-name">Təcrübə portalı</span><small id="program-name">Kibertəhlükəsizlik</small></span></a>
   <nav aria-label="Proqram həftələri"><h2>Proqram</h2><div id="weeks"></div></nav>
