@@ -43,3 +43,7 @@ Run `backend/lesson-uploads.sql` after the password-change migration. Mentors ca
 Create a GitHub repository and commit `docs/`, `backend/` and this README. In **Settings → Pages**, choose **Deploy from a branch**, then select `main` and `/docs`. The Day 1 slide deck is a public static asset on a standard GitHub Pages site. Student records and files are stored in Supabase. Keep the original Kahoot workbook with mentor materials because it contains the answer key.
 
 Before sharing the link, create two test student accounts and a mentor account. Check that a student can submit and see feedback, the mentor can publish a task and review the work, and the second student can see only their own submissions. The frontend preview does not exercise the live backend.
+
+## Student progress and read-only administrators
+
+Run `backend/student-progress.sql` after the password-change migration. Each lesson shows all students, completion totals, submitted answers, and missing tasks. Read-only administrators can inspect the same progress and answers without editing lessons or feedback. When provisioning a new viewer through the Supabase Auth Admin API, set server-controlled `app_metadata.portal_read_only` to `true`. The production project uses its Auth enrollment trigger to assign the corresponding roster role. Viewers must replace their temporary password before opening the portal.

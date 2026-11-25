@@ -6,6 +6,9 @@ const demo = !config.url && !config.publishableKey;
 let api, user, mentor = false, rosterMissing = false, week = 1, lesson = 1;
 let tasks = demo ? [...initialTasks] : [];
 let submissions = [];
+let viewer = false;
+let students = demo ? [{ id: 'student-demo', display_name: 'Nümunə şagird' }] : [];
+let openStudents = new Set();
 let details = new Map();
 let viewRequest = 0;
 let signInReady = false;
@@ -86,15 +89,17 @@ async function refresh() {
   const request = ++viewRequest;
   if (api) {
     const member = user && !rosterMissing && !mustChangePassword;
-    const [detailResult, taskResult, submissionResult] = await Promise.all([
+    const [detailResult, taskResult, submissionResult, rosterResult] = await Promise.all([
       api.from('site_details').select('*'),
       member ? api.from('tasks').select('*').order('created_at').order('id') : null,
-      member ? api.from('submissions').select('*').order('submitted_at', { ascending: false }) : null
+      member ? api.from('submissions').select('*').order('submitted_at', { ascending: false }) : null,
+      member && (mentor || viewer) ? api.rpc('portal_student_roster') : null
     ]);
     if (request !== viewRequest) return;
     const rows = check(detailResult, 'Portal məlumatlarını yükləmək mümkün olmadı.');
     tasks = member ? check(taskResult, 'Tapşırıqları yükləmək mümkün olmadı.') : [];
     submissions = member ? check(submissionResult, 'Təqdimatları yükləmək mümkün olmadı.') : [];
+    students = rosterResult ? check(rosterResult, 'Şagird siyahısı yüklənmədi.') : [];
     details = new Map(rows.map(row => [row.section, row]));
   }
   render();
@@ -114,14 +119,17 @@ async function loadAccount(sessionUser) {
   submissions = [];
   details.clear();
   mentor = false;
+  viewer = false;
+  openStudents.clear();
   rosterMissing = Boolean(sessionUser);
   mustChangePassword = false;
   if (sessionUser) {
     const member = check(await api.from('members').select('role,must_change_password').eq('id', sessionUser.id).maybeSingle(), 'Hesaba giriş yoxlanmadı.');
     if (user !== sessionUser) return;
     mentor = member?.role === 'mentor';
+    viewer = member?.role === 'viewer';
     rosterMissing = !member;
-    mustChangePassword = member?.role === 'student' && member.must_change_password;
+    mustChangePassword = Boolean(member && !mentor && member.must_change_password);
   }
   await refresh();
 }
@@ -177,6 +185,7 @@ function render() {
     tasks.filter(task => task.week === weekNumber && task.lesson === lessonNumber);
   const current = lessonTasks(week, lesson);
   const select = (weekNumber, lessonNumber, focusId) => {
+    openStudents.clear();
     week = weekNumber;
     lesson = lessonNumber;
     render();
@@ -227,38 +236,39 @@ function render() {
   $('no-material').hidden = hasMaterial;
   $('editor').hidden = !mentor;
   const completed = current.filter(task => studentSubmission(task.id)).length;
-  $('progress-panel').hidden = mentor || !current.length;
+  $('progress-panel').hidden = mentor || viewer || !current.length;
   $('progress').textContent = completed + ' / ' + current.length + ' təqdim edilib';
   $('meter').max = current.length || 1;
   $('meter').value = completed;
   $('tasks').replaceChildren(...(current.length ? current.map(taskCard) : [
     element('p', !demo && !user ? 'Tapşırıqlar girişdən sonra görünür.' : 'Bu dərs üçün tapşırıq hələ paylaşılmayıb.', 'empty')
   ]));
-  $('mentor').hidden = !mentor;
+  $('mentor').hidden = !(mentor || viewer);
   $('new-task').hidden = !mentor;
-  if (mentor) {
+  if (mentor || viewer) {
     const rows = submissions.filter(row => current.some(task => task.id === row.task_id));
-    $('review-count').textContent = rows.length ? rows.length + ' təqdimat' : '';
-    $('submissions').replaceChildren(...(rows.length ? rows.map(reviewCard) : [
-      element('p', 'Bu dərs üzrə təqdim olunan iş yoxdur.', 'empty')
+    $('review-count').textContent = students.length + ' şagird · ' + rows.length + ' təqdimat';
+    $('submissions').replaceChildren(...(students.length ? students.map(student => studentCard(student, current, rows)) : [
+      element('p', 'Şagird siyahısı boşdur.', 'empty')
     ]));
   } else {
     $('submissions').replaceChildren();
   }
+
 }
 
 function taskCard(task) {
   const card = element('article', null, 'card');
   card.append(element('h3', task.title), element('p', task.instructions));
   const row = studentSubmission(task.id);
-  if (row && !mentor) {
+  if (row && !mentor && !viewer) {
     card.append(element('span', 'Təqdim edilib · ' + dateFormat.format(new Date(row.submitted_at)), 'tag'));
     if (row.answer) card.append(element('p', row.answer));
     if (row.file_name) card.append(attachmentButton(row));
     if (row.feedback) card.append(element('strong', 'Mentor rəyi'), element('p', row.feedback));
   } else if (mentor) {
     card.append(button('Redaktə et', () => taskEditor(task), 'quiet'));
-  } else if (demo || user) {
+  } else if (!viewer && (demo || user)) {
     card.append(button('Cavab göndər', () => submitTask(task)));
   }
   return card;
@@ -343,16 +353,41 @@ function attachmentButton(row) {
   return node;
 }
 
-function reviewCard(row) {
+function studentCard(student, current, rows) {
+  const card = element('details', null, 'student-card');
+  const submitted = new Map(rows.filter(row => row.student_id === student.id).map(row => [row.task_id, row]));
+  const summary = element('summary');
+  summary.append(
+    element('span', student.display_name),
+    element('span', submitted.size + ' / ' + current.length, 'student-count')
+  );
+  card.open = openStudents.has(student.id);
+  card.addEventListener('toggle', () => {
+    if (card.open) openStudents.add(student.id);
+    else openStudents.delete(student.id);
+  });
+  const contents = element('div', null, 'student-answers');
+  contents.append(...(current.length ? current.map(task => {
+    const row = submitted.get(task.id);
+    if (row) return reviewCard(row, task.title);
+    const empty = element('article', null, 'card');
+    empty.append(element('h3', task.title), element('p', 'Təqdim edilməyib'));
+    return empty;
+  }) : [element('p', 'Bu dərsdə tapşırıq yoxdur.')]));
+  card.append(summary, contents);
+  return card;
+}
+
+function reviewCard(row, title) {
   const card = element('article', null, 'card');
   card.append(
-    element('h3', tasks.find(task => task.id === row.task_id).title),
+    element('h3', title),
     element('p', row.student_email + ' · ' + dateFormat.format(new Date(row.submitted_at))),
     element('p', row.answer || 'Fayl əlavə olunub.')
   );
   if (row.file_name) card.append(attachmentButton(row));
   if (row.feedback) card.append(element('strong', 'Mentor rəyi'), element('p', row.feedback));
-  card.append(button(row.feedback ? 'Rəyi redaktə et' : 'Rəy yaz', () => {
+  if (mentor) card.append(button(row.feedback ? 'Rəyi redaktə et' : 'Rəy yaz', () => {
     show('Mentor rəyi', form([
       field('Rəy', 'feedback', 'textarea', { value: row.feedback || '', required: true, maxLength: 4000 })
     ], 'Rəyi saxla', async data => {
