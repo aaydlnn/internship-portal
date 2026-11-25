@@ -270,12 +270,24 @@ function render() {
 
 }
 
+function splitEmlQuestions(instructions) {
+  const lines = instructions.trimEnd().split(/\r?\n/);
+  const questions = lines.slice(-5);
+  if (questions.length !== 5 || !questions.every((question, index) => question.startsWith((index + 1) + '. '))) {
+    return null;
+  }
+  return { intro: lines.slice(0, -5).join('\n').trimEnd(), questions };
+}
+
 function taskCard(task) {
   const card = element('article', null, 'card');
   card.append(element('h3', task.title));
   if (task.eml_file) card.append(emlDownloadButton(task.eml_file));
-  card.append(element('p', task.instructions));
   const row = studentSubmission(task.id);
+  const canShowAnswerForm = !row && !viewer && (!mentor || studentPreview) && (demo || user);
+  const exercise = task.eml_file && canShowAnswerForm ? splitEmlQuestions(task.instructions) : null;
+  const instructions = exercise ? exercise.intro : task.instructions;
+  if (instructions) card.append(element('p', instructions));
   if (row && !mentor && !viewer) {
     card.append(element('span', 'Təqdim edilib · ' + dateFormat.format(new Date(row.submitted_at)), 'tag'));
     if (row.answer) card.append(element('p', row.answer));
@@ -286,7 +298,7 @@ function taskCard(task) {
     card.append(button('Redaktə et', () => taskEditor(task), 'quiet'));
   } else if (!viewer && (demo || user)) {
     if (task.eml_file) {
-      card.append(submissionForm(task, true, studentPreview));
+      card.append(submissionForm(task, true, studentPreview, exercise?.questions));
     } else {
       const answerButton = button('Cavab göndər', () => show(task.title, submissionForm(task)));
       answerButton.disabled = studentPreview;
@@ -296,20 +308,33 @@ function taskCard(task) {
   return card;
 }
 
-function submissionForm(task, inline = false, preview = false) {
-  const answerField = field(inline ? 'Bu məktuba cavabınız' : 'Cavab', 'answer', 'textarea', {
-    maxLength: 6000, required: inline, disabled: preview,
-    value: inline && !preview ? (draftAnswers.get(task.id) || '') : ''
+function submissionForm(task, inline = false, preview = false, questions = null) {
+  const prompts = questions || [inline ? 'Bu məktuba cavabınız' : 'Cavab'];
+  const names = questions ? questions.map((_, index) => 'answer-' + (index + 1)) : ['answer'];
+  const saved = inline && !preview ? draftAnswers.get(task.id) : null;
+  const fields = prompts.map((prompt, index) => {
+    const name = names[index];
+    const answerField = field(prompt, name, 'textarea', {
+      maxLength: 6000, required: inline, disabled: preview, value: saved?.[name] || ''
+    });
+    if (inline && !preview) {
+      const input = answerField.firstElementChild;
+      input.addEventListener('input', () => {
+        draftAnswers.set(task.id, { ...draftAnswers.get(task.id), [name]: input.value });
+      });
+    }
+    return answerField;
   });
-  const fields = [answerField];
-  if (inline) {
-    const input = answerField.firstElementChild;
-    input.addEventListener('input', () => draftAnswers.set(task.id, input.value));
-  } else {
+  if (!inline) {
     fields.push(field('Fayl · PDF, JPG və PNG · maksimum 10 MB', 'file', 'file', { accept: mimeTypes.join(',') }));
   }
   return form(fields, 'Təqdim et', async data => {
-    const answer = data.get('answer').trim();
+    const answers = names.map(name => (data.get(name) || '').trim());
+    if (questions && answers.some(answer => !answer)) throw new Error('Beş sualın hamısına cavab yazın.');
+    const answer = questions
+      ? answers.map((text, index) => (index + 1) + '. ' + text).join('\n\n')
+      : answers[0];
+    if (answer.length > 6000) throw new Error('Cavabların ümumi uzunluğu 6000 simvoldan çox olmamalıdır.');
     const file = data.get('file');
     if (!answer && !file?.size) throw new Error(inline ? 'Bu məktuba cavab yazın.' : 'Cavab yaz və ya fayl seç.');
     if (file?.size && (!mimeTypes.includes(file.type) || file.size > 10 * 1024 * 1024 || file.name.length > 255)) {
