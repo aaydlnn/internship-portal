@@ -11,6 +11,13 @@ let viewRequest = 0;
 let signInReady = false;
 let mustChangePassword = false;
 const samples = new Map();
+const materialFiles = new Map();
+const materialTypes = new Map([
+  ['pdf', 'application/pdf'],
+  ['ppt', 'application/vnd.ms-powerpoint'],
+  ['pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+  ['html', 'text/html'], ['htm', 'text/html']
+]);
 const mimeTypes = ['application/pdf','image/jpeg','image/png'];
 const dateFormat = new Intl.DateTimeFormat('az-AZ', {
   dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Baku'
@@ -131,6 +138,7 @@ function lessonDetails(weekNumber, lessonNumber) {
     title: first ? 'Kibertəhlükəsizliyə giriş' : 'Dərs ' + lessonNumber,
     description: first ? 'İlk dərsin slaydlarına bax və mövzunu iki tapşırıqla möhkəmləndir.' : '',
     material_title: '', material_url: '', material_hidden: false,
+    material_file_path: null, material_file_name: null,
     ...details.get(section)
   };
 }
@@ -162,8 +170,9 @@ function render() {
   else $('login-form').replaceChildren();
   const info = lessonDetails(week, lesson);
   const external = info.material_hidden ? '' : materialUrl(info.material_url);
-  const slides = !info.material_hidden && !external && week === 1 && lesson === 1;
-  const hasMaterial = Boolean(external || slides);
+  const uploaded = !info.material_hidden && Boolean(info.material_file_path);
+  const slides = !info.material_hidden && !external && !uploaded && week === 1 && lesson === 1;
+  const hasMaterial = Boolean(external || slides || uploaded);
   const lessonTasks = (weekNumber, lessonNumber) =>
     tasks.filter(task => task.week === weekNumber && task.lesson === lessonNumber);
   const current = lessonTasks(week, lesson);
@@ -197,7 +206,7 @@ function render() {
     item.append(element('span', lessonInfo.title));
     const count = lessonTasks(week, number).length;
     if (count) item.append(element('small', count + ' tapşırıq'));
-    else if (!lessonInfo.material_hidden && (materialUrl(lessonInfo.material_url) || (week === 1 && number === 1))) {
+    else if (!lessonInfo.material_hidden && (lessonInfo.material_file_path || materialUrl(lessonInfo.material_url) || (week === 1 && number === 1))) {
       item.append(element('small', 'Material'));
     }
     return item;
@@ -208,10 +217,11 @@ function render() {
   $('intro').textContent = info.description;
   $('intro').hidden = !info.description;
   $('resource').hidden = !hasMaterial;
-  $('material-title').textContent = info.material_title || (slides ? 'İnteraktiv slaydlar' : 'Dərs materialı');
-  $('material-meta').textContent = slides ? '32 slayd' : 'Xarici keçid';
+  $('material-title').textContent = info.material_title || (slides ? 'İnteraktiv slaydlar' : info.material_file_name || 'Dərs materialı');
+  $('material-meta').textContent = slides ? '32 slayd' : uploaded ? info.material_file_name : 'Xarici keçid';
   $('open-lesson').hidden = !slides;
   $('material-link').hidden = !external;
+  $('download-material').hidden = !uploaded;
   if (external) $('material-link').href = external;
   else $('material-link').removeAttribute('href');
   $('no-material').hidden = hasMaterial;
@@ -288,6 +298,34 @@ function submitTask(task) {
   }));
 }
 
+function downloadFile(file, name) {
+  const href = URL.createObjectURL(file);
+  const link = element('a');
+  link.href = href;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 30000);
+}
+
+$('download-material').onclick = async () => {
+  const info = lessonDetails(week, lesson);
+  if (!info.material_file_path || info.material_hidden) return;
+  const control = $('download-material');
+  control.disabled = true;
+  try {
+    const file = api
+      ? check(await api.storage.from('lesson-materials').download(info.material_file_path), 'Fayl endirilmədi.')
+      : materialFiles.get(info.material_file_path);
+    downloadFile(file, info.material_file_name);
+  } catch {
+    $('notice').textContent = 'Materialı endirmək mümkün olmadı.';
+  } finally {
+    control.disabled = false;
+  }
+};
+
 function attachmentButton(row) {
   const node = button('Faylı endir · ' + row.file_name, async () => {
     node.disabled = true;
@@ -295,14 +333,7 @@ function attachmentButton(row) {
       const file = demo ? samples.get(row.file_path) : check(
         await api.storage.from('internship-files').download(row.file_path), 'Faylı endirmək mümkün olmadı.'
       );
-      const href = URL.createObjectURL(file);
-      const link = element('a');
-      link.href = href;
-      link.download = row.file_name;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(href), 30000);
+      downloadFile(file, row.file_name);
     } catch {
       $('notice').textContent = 'Faylı endirmək mümkün olmadı.';
     } finally {
@@ -335,19 +366,57 @@ function reviewCard(row) {
   return card;
 }
 
-function saveDetails(section, fields) {
+async function saveLessonFile(row, data, existing) {
+  const file = data.get('material_file');
+  const remove = data.get('remove_material_file') === 'on';
+  if (file?.size && row.material_url) throw new Error('Bir material seç: fayl və ya keçid.');
+  if (file?.size) {
+    const extension = file.name.split('.').pop().toLowerCase();
+    const type = materialTypes.get(extension);
+    if (!type || file.size > 20 * 1024 * 1024 || file.name.length > 255) {
+      throw new Error('PDF, PPT, PPTX və ya HTML faylı seç. Maksimum ölçü 20 MB-dır.');
+    }
+    const path = crypto.randomUUID() + '.' + (extension === 'htm' ? 'html' : extension);
+    if (api) {
+      check(await api.storage.from('lesson-materials').upload(path, file, { contentType: type }), 'Fayl yüklənmədi. Yenidən cəhd et.');
+    } else {
+      materialFiles.set(path, file);
+    }
+    row.material_file_path = path;
+    row.material_file_name = file.name;
+    return path;
+  }
+  const keep = !remove && !row.material_url;
+  row.material_file_path = keep ? existing.material_file_path : null;
+  row.material_file_name = keep ? existing.material_file_name : null;
+  return null;
+}
+
+async function cleanupMaterial(path) {
+  if (api) await api.storage.from('lesson-materials').remove([path]);
+  else materialFiles.delete(path);
+}
+
+function saveDetails(section, fields, existing) {
   return async data => {
     const row = { section };
     for (const name of fields) row[name] = data.get(name).trim();
     if (!row.title) throw new Error('Adı daxil et.');
-    if (fields.includes('material_url')) {
+    let uploadedPath = null;
+    if (existing) {
       row.material_hidden = data.get('material_hidden') === 'on';
       if (row.material_url && !materialUrl(row.material_url)) {
         throw new Error('Material üçün düzgün HTTPS keçidi daxil et.');
       }
+      uploadedPath = await saveLessonFile(row, data, existing);
     }
-    if (api) {
-      check(await api.from('site_details').upsert(row).select().single(), 'Dəyişikliklər saxlanmadı.');
+    try {
+      if (api) {
+        check(await api.from('site_details').upsert(row).select().single(), 'Dəyişikliklər saxlanmadı.');
+      }
+    } catch (error) {
+      if (uploadedPath) await cleanupMaterial(uploadedPath).catch(() => {});
+      throw error;
     }
     ++viewRequest;
     details.set(section, row);
@@ -378,13 +447,25 @@ $('edit-lesson').onclick = () => {
   const info = lessonDetails(week, lesson);
   const hideMaterial = field('Materialı gizlət', 'material_hidden', 'checkbox', { checked: info.material_hidden });
   hideMaterial.className = 'checkbox';
+  const removeFile = field('Faylı dərsdən çıxar', 'remove_material_file', 'checkbox');
+  removeFile.className = 'checkbox';
+  removeFile.hidden = !info.material_file_path;
+  const fileLabel = 'Slayd faylı · PDF, PPT, PPTX, HTML · 20 MB';
+  const urlInput = field('Materialın HTTPS keçidi', 'material_url', 'url', { value: info.material_url, maxLength: 2000 });
+  const fileInput = field(fileLabel, 'material_file', 'file', { accept: '.pdf,.ppt,.pptx,.html,.htm' });
+  fileInput.firstElementChild.onchange = () => {
+    if (fileInput.firstElementChild.files.length) urlInput.firstElementChild.value = '';
+  };
   show('Həftə ' + week + ' · Dərs ' + lesson + ' · Redaktə', form([
     titleField('Dərsin adı', info.title),
     field('Dərsin təsviri', 'description', 'textarea', { value: info.description, maxLength: 2400 }),
     field('Materialın adı', 'material_title', 'text', { value: info.material_title, maxLength: 120 }),
-    field('Materialın HTTPS keçidi', 'material_url', 'url', { value: info.material_url, maxLength: 2000 }),
+    urlInput,
+    fileInput,
+    ...(info.material_file_name ? [element('p', 'Hazırkı fayl: ' + info.material_file_name)] : []),
+    removeFile,
     hideMaterial
-  ], 'Saxla', saveDetails(info.section, ['title', 'description', 'material_title', 'material_url'])));
+  ], 'Saxla', saveDetails(info.section, ['title', 'description', 'material_title', 'material_url'], info)));
 };
 
 function taskEditor(existing) {
