@@ -66,3 +66,5 @@ textarea{resize:vertical;min-height:105px}.form-error{color:#9a2735}.form-error:
 .student-card summary:focus-visible{outline:3px solid #3397e9;outline-offset:2px}
 
 .draft-tag{justify-self:start;border-radius:99px;padding:4px 9px;background:#f9eac5;color:#654300;font-size:.88rem;font-weight:700}
+
+.bar-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}

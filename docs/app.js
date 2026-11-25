@@ -7,6 +7,7 @@ let api, user, mentor = false, rosterMissing = false, week = 1, lesson = 1;
 let tasks = demo ? [...initialTasks] : [];
 let submissions = [];
 let viewer = false;
+let studentPreview = false;
 let students = demo ? [{ id: 'student-demo', display_name: 'Nümunə şagird' }] : [];
 let openStudents = new Set();
 let details = new Map();
@@ -58,9 +59,10 @@ function field(label, name, type = 'text', options = {}) {
   return wrapper;
 }
 
-function form(fields, action, onSubmit, closeDialog = true) {
+function form(fields, action, onSubmit, closeDialog = true, disabled = false) {
   const node = element('form');
   const submit = element('button', action);
+  submit.disabled = disabled;
   const status = element('p', '', 'form-error');
   status.setAttribute('role','alert');
   node.append(...fields, submit, status);
@@ -115,7 +117,10 @@ function updateView() {
 
 async function loadAccount(sessionUser) {
   ++viewRequest;
-  if (user?.id !== sessionUser?.id) draftAnswers.clear();
+  if (user?.id !== sessionUser?.id) {
+    draftAnswers.clear();
+    studentPreview = false;
+  }
   user = sessionUser;
   tasks = [];
   submissions = [];
@@ -137,6 +142,7 @@ async function loadAccount(sessionUser) {
 }
 
 function studentSubmission(taskId) {
+  if (studentPreview) return undefined;
   return submissions.find(row => row.task_id === taskId && row.student_id === (demo ? 'student-demo' : user?.id));
 }
 
@@ -163,8 +169,12 @@ function materialUrl(value) {
 }
 
 function render() {
+  const mentorView = mentor && !studentPreview;
+  const reviewView = mentorView || viewer;
+  $('student-preview').hidden = !mentor;
+  $('student-preview').textContent = studentPreview ? 'Mentor panelinə qayıt' : 'Tələbə görünüşü';
   $('account').textContent = demo ? (mentor ? 'Şagird görünüşü' : 'Mentor görünüşü') : (user ? 'Çıxış' : 'Daxil ol');
-  $('notice').textContent = demo
+  $('notice').textContent = studentPreview ? 'Tələbə görünüşü · sınaq rejimi' : demo
     ? 'Sınaq rejimi · Məlumatlar bu səhifə yenilənənədək saxlanılır. Yalnız nümunə məlumatlardan istifadə et.'
     : rosterMissing ? 'Bu hesab proqram siyahısında yoxdur. Mentorla əlaqə saxla.'
     : !user ? 'Tapşırıqları görmək və işini göndərmək üçün daxil ol.' : user.email;
@@ -184,7 +194,7 @@ function render() {
   const slides = !info.material_hidden && !external && !uploaded && week === 1 && lesson === 1;
   const hasMaterial = Boolean(external || slides || uploaded);
   const lessonTasks = (weekNumber, lessonNumber) =>
-    tasks.filter(task => task.week === weekNumber && task.lesson === lessonNumber && (mentor || task.published !== false));
+    tasks.filter(task => task.week === weekNumber && task.lesson === lessonNumber && (mentorView || task.published !== false));
   const current = lessonTasks(week, lesson);
   const select = (weekNumber, lessonNumber, focusId) => {
     openStudents.clear();
@@ -236,18 +246,18 @@ function render() {
   if (external) $('material-link').href = external;
   else $('material-link').removeAttribute('href');
   $('no-material').hidden = hasMaterial;
-  $('editor').hidden = !mentor;
+  $('editor').hidden = !mentorView;
   const completed = current.filter(task => studentSubmission(task.id)).length;
-  $('progress-panel').hidden = mentor || viewer || !current.length;
+  $('progress-panel').hidden = reviewView || !current.length;
   $('progress').textContent = completed + ' / ' + current.length + ' təqdim edilib';
   $('meter').max = current.length || 1;
   $('meter').value = completed;
   $('tasks').replaceChildren(...(current.length ? current.map(taskCard) : [
     element('p', !demo && !user ? 'Tapşırıqlar girişdən sonra görünür.' : 'Bu dərs üçün tapşırıq hələ paylaşılmayıb.', 'empty')
   ]));
-  $('mentor').hidden = !(mentor || viewer);
-  $('new-task').hidden = !mentor;
-  if (mentor || viewer) {
+  $('mentor').hidden = !reviewView;
+  $('new-task').hidden = !mentorView;
+  if (reviewView) {
     const shared = current.filter(task => task.published !== false);
     const rows = submissions.filter(row => shared.some(task => task.id === row.task_id));
     $('review-count').textContent = students.length + ' şagird · ' + rows.length + ' təqdimat';
@@ -271,22 +281,25 @@ function taskCard(task) {
     if (row.answer) card.append(element('p', row.answer));
     if (row.file_name) card.append(attachmentButton(row));
     if (row.feedback) card.append(element('strong', 'Mentor rəyi'), element('p', row.feedback));
-  } else if (mentor) {
+  } else if (mentor && !studentPreview) {
     if (task.published === false) card.append(element('span', 'Qaralama · yalnız mentor görür', 'draft-tag'));
     card.append(button('Redaktə et', () => taskEditor(task), 'quiet'));
   } else if (!viewer && (demo || user)) {
     if (task.eml_file) {
-      card.append(submissionForm(task, true));
+      card.append(submissionForm(task, true, studentPreview));
     } else {
-      card.append(button('Cavab göndər', () => show(task.title, submissionForm(task))));
+      const answerButton = button('Cavab göndər', () => show(task.title, submissionForm(task)));
+      answerButton.disabled = studentPreview;
+      card.append(answerButton);
     }
   }
   return card;
 }
 
-function submissionForm(task, inline = false) {
+function submissionForm(task, inline = false, preview = false) {
   const answerField = field(inline ? 'Bu məktuba cavabınız' : 'Cavab', 'answer', 'textarea', {
-    maxLength: 6000, required: inline, value: inline ? (draftAnswers.get(task.id) || '') : ''
+    maxLength: 6000, required: inline, disabled: preview,
+    value: inline && !preview ? (draftAnswers.get(task.id) || '') : ''
   });
   const fields = [answerField];
   if (inline) {
@@ -323,7 +336,7 @@ function submissionForm(task, inline = false) {
     }
     draftAnswers.delete(task.id);
     render();
-  }, !inline);
+  }, !inline, preview);
 }
 
 function emlDownloadButton(filename) {
@@ -628,8 +641,16 @@ function renderSignIn() {
   container.replaceChildren(login);
 }
 
+$('student-preview').onclick = () => {
+  if (!mentor) return;
+  if ($('modal').open) $('modal').close();
+  studentPreview = !studentPreview;
+  render();
+};
+
 $('account').onclick = async () => {
   if (demo) {
+    studentPreview = false;
     mentor = !mentor;
     render();
     return;
