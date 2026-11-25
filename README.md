@@ -51,3 +51,7 @@ Run `backend/student-progress.sql` after the password-change migration. Each les
 ## Task drafts
 
 Run `backend/task-drafts.sql` to enable mentor-only drafts. New tasks start as drafts in the lesson editor. Check **Şagirdlərə göstər** and save to publish. Drafts are excluded from student and read-only admin views, and from completion totals.
+
+## Original email exercises
+
+Run `backend/task-eml-files.sql` after the draft migration. Store the original samples in the private `task-eml-files` bucket and reference the filenames in `tasks.eml_file`. Downloads follow the corresponding task’s visibility and first-login password restrictions. The portal downloads the raw message bytes as an attachment for offline analysis.

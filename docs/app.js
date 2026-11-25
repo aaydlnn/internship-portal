@@ -260,7 +260,9 @@ function render() {
 
 function taskCard(task) {
   const card = element('article', null, 'card');
-  card.append(element('h3', task.title), element('p', task.instructions));
+  card.append(element('h3', task.title));
+  if (task.eml_file) card.append(emlDownloadButton(task.eml_file));
+  card.append(element('p', task.instructions));
   const row = studentSubmission(task.id);
   if (row && !mentor && !viewer) {
     card.append(element('span', 'Təqdim edilib · ' + dateFormat.format(new Date(row.submitted_at)), 'tag'));
@@ -308,6 +310,21 @@ function submitTask(task) {
     }
     render();
   }));
+}
+
+function emlDownloadButton(filename) {
+  const control = button('.eml faylını endir · ' + filename, async () => {
+    control.disabled = true;
+    try {
+      const file = check(await api.storage.from('task-eml-files').download(filename), 'Məktub faylı endirilmədi.');
+      downloadFile(new Blob([file], { type: 'application/octet-stream' }), filename);
+    } catch (error) {
+      $('notice').textContent = error.message || 'Məktub faylı endirilmədi.';
+    } finally {
+      control.disabled = false;
+    }
+  }, 'quiet');
+  return control;
 }
 
 function downloadFile(file, name) {
