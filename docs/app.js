@@ -182,7 +182,7 @@ function render() {
   const slides = !info.material_hidden && !external && !uploaded && week === 1 && lesson === 1;
   const hasMaterial = Boolean(external || slides || uploaded);
   const lessonTasks = (weekNumber, lessonNumber) =>
-    tasks.filter(task => task.week === weekNumber && task.lesson === lessonNumber);
+    tasks.filter(task => task.week === weekNumber && task.lesson === lessonNumber && (mentor || task.published !== false));
   const current = lessonTasks(week, lesson);
   const select = (weekNumber, lessonNumber, focusId) => {
     openStudents.clear();
@@ -213,7 +213,7 @@ function render() {
     item.setAttribute('aria-current', String(lesson === number));
     const lessonInfo = lessonDetails(week, number);
     item.append(element('span', lessonInfo.title));
-    const count = lessonTasks(week, number).length;
+    const count = lessonTasks(week, number).filter(task => task.published !== false).length;
     if (count) item.append(element('small', count + ' tapşırıq'));
     else if (!lessonInfo.material_hidden && (lessonInfo.material_file_path || materialUrl(lessonInfo.material_url) || (week === 1 && number === 1))) {
       item.append(element('small', 'Material'));
@@ -246,9 +246,10 @@ function render() {
   $('mentor').hidden = !(mentor || viewer);
   $('new-task').hidden = !mentor;
   if (mentor || viewer) {
-    const rows = submissions.filter(row => current.some(task => task.id === row.task_id));
+    const shared = current.filter(task => task.published !== false);
+    const rows = submissions.filter(row => shared.some(task => task.id === row.task_id));
     $('review-count').textContent = students.length + ' şagird · ' + rows.length + ' təqdimat';
-    $('submissions').replaceChildren(...(students.length ? students.map(student => studentCard(student, current, rows)) : [
+    $('submissions').replaceChildren(...(students.length ? students.map(student => studentCard(student, shared, rows)) : [
       element('p', 'Şagird siyahısı boşdur.', 'empty')
     ]));
   } else {
@@ -267,6 +268,7 @@ function taskCard(task) {
     if (row.file_name) card.append(attachmentButton(row));
     if (row.feedback) card.append(element('strong', 'Mentor rəyi'), element('p', row.feedback));
   } else if (mentor) {
+    if (task.published === false) card.append(element('span', 'Qaralama · yalnız mentor görür', 'draft-tag'));
     card.append(button('Redaktə et', () => taskEditor(task), 'quiet'));
   } else if (!viewer && (demo || user)) {
     card.append(button('Cavab göndər', () => submitTask(task)));
@@ -507,20 +509,24 @@ function taskEditor(existing) {
   const selectedWeek = week;
   const selectedLesson = lesson;
   const action = existing ? 'Tapşırığı redaktə et' : 'Yeni tapşırıq';
+  const visibility = field('Şagirdlərə göstər', 'published', 'checkbox', { checked: Boolean(existing && existing.published !== false) });
+  visibility.className = 'checkbox';
   show('Həftə ' + selectedWeek + ' · Dərs ' + selectedLesson + ' · ' + action, form([
     titleField('Başlıq', existing?.title || ''),
-    field('Təlimat', 'instructions', 'textarea', { value: existing?.instructions || '', required: true, maxLength: 4000 })
-  ], existing ? 'Saxla' : 'Paylaş', async data => {
+    field('Təlimat', 'instructions', 'textarea', { value: existing?.instructions || '', required: true, maxLength: 4000 }),
+    visibility
+  ], 'Saxla', async data => {
     const title = data.get('title').trim();
     const instructions = data.get('instructions').trim();
     if (!title || !instructions) throw new Error('Başlıq və təlimatı doldur.');
+    const published = data.get('published') === 'on';
     if (existing) {
-      const changes = { title, instructions };
+      const changes = { title, instructions, published };
       if (api) check(await api.from('tasks').update(changes).eq('id', existing.id).select().single(), 'Tapşırıq yenilənmədi.');
       ++viewRequest;
       tasks = tasks.map(task => task.id === existing.id ? { ...task, ...changes } : task);
     } else {
-      const task = { id: crypto.randomUUID(), week: selectedWeek, lesson: selectedLesson, title, instructions };
+      const task = { id: crypto.randomUUID(), week: selectedWeek, lesson: selectedLesson, title, instructions, published };
       if (api) check(await api.from('tasks').insert(task), 'Tapşırıq paylaşılmadı.');
       ++viewRequest;
       tasks.push(task);

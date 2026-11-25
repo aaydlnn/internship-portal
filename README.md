@@ -47,3 +47,7 @@ Before sharing the link, create two test student accounts and a mentor account. 
 ## Student progress and read-only administrators
 
 Run `backend/student-progress.sql` after the password-change migration. Each lesson shows all students, completion totals, submitted answers, and missing tasks. Read-only administrators can inspect the same progress and answers without editing lessons or feedback. When provisioning a new viewer through the Supabase Auth Admin API, set server-controlled `app_metadata.portal_read_only` to `true`. The production project uses its Auth enrollment trigger to assign the corresponding roster role. Viewers must replace their temporary password before opening the portal.
+
+## Task drafts
+
+Run `backend/task-drafts.sql` to enable mentor-only drafts. New tasks start as drafts in the lesson editor. Check **Şagirdlərə göstər** and save to publish. Drafts are excluded from student and read-only admin views, and from completion totals.
