@@ -15,6 +15,7 @@ let signInReady = false;
 let mustChangePassword = false;
 const samples = new Map();
 const materialFiles = new Map();
+const draftAnswers = new Map();
 const materialTypes = new Map([
   ['pdf', 'application/pdf'],
   ['ppt', 'application/vnd.ms-powerpoint'],
@@ -114,6 +115,7 @@ function updateView() {
 
 async function loadAccount(sessionUser) {
   ++viewRequest;
+  if (user?.id !== sessionUser?.id) draftAnswers.clear();
   user = sessionUser;
   tasks = [];
   submissions = [];
@@ -273,25 +275,36 @@ function taskCard(task) {
     if (task.published === false) card.append(element('span', 'Qaralama · yalnız mentor görür', 'draft-tag'));
     card.append(button('Redaktə et', () => taskEditor(task), 'quiet'));
   } else if (!viewer && (demo || user)) {
-    card.append(button('Cavab göndər', () => submitTask(task)));
+    if (task.eml_file) {
+      card.append(submissionForm(task, true));
+    } else {
+      card.append(button('Cavab göndər', () => show(task.title, submissionForm(task))));
+    }
   }
   return card;
 }
 
-function submitTask(task) {
-  show(task.title, form([
-    field('Cavab', 'answer', 'textarea', { maxLength: 6000 }),
-    field('Fayl · PDF, JPG və PNG · maksimum 10 MB', 'file', 'file', { accept: mimeTypes.join(',') })
-  ], 'Təqdim et', async data => {
+function submissionForm(task, inline = false) {
+  const answerField = field(inline ? 'Bu məktuba cavabınız' : 'Cavab', 'answer', 'textarea', {
+    maxLength: 6000, required: inline, value: inline ? (draftAnswers.get(task.id) || '') : ''
+  });
+  const fields = [answerField];
+  if (inline) {
+    const input = answerField.firstElementChild;
+    input.addEventListener('input', () => draftAnswers.set(task.id, input.value));
+  } else {
+    fields.push(field('Fayl · PDF, JPG və PNG · maksimum 10 MB', 'file', 'file', { accept: mimeTypes.join(',') }));
+  }
+  return form(fields, 'Təqdim et', async data => {
     const answer = data.get('answer').trim();
     const file = data.get('file');
-    if (!answer && !file.size) throw new Error('Cavab yaz və ya fayl seç.');
-    if (file.size && (!mimeTypes.includes(file.type) || file.size > 10 * 1024 * 1024 || file.name.length > 255)) {
+    if (!answer && !file?.size) throw new Error(inline ? 'Bu məktuba cavab yazın.' : 'Cavab yaz və ya fayl seç.');
+    if (file?.size && (!mimeTypes.includes(file.type) || file.size > 10 * 1024 * 1024 || file.name.length > 255)) {
       throw new Error('PDF, JPG və ya PNG seç. Faylın ölçüsü 10 MB-dan çox olmamalıdır.');
     }
     const id = crypto.randomUUID();
     const studentId = demo ? 'student-demo' : user.id;
-    const path = file.size ? studentId + '/' + id : null;
+    const path = file?.size ? studentId + '/' + id : null;
     const row = { id, task_id: task.id, student_id: studentId, answer, file_path: path, file_name: path ? file.name : null };
     if (demo) {
       if (studentSubmission(task.id)) throw new Error('Bu tapşırıq artıq təqdim edilib.');
@@ -308,8 +321,9 @@ function submitTask(task) {
       }
       submissions = [result.data, ...submissions.filter(item => item.id !== id)];
     }
+    draftAnswers.delete(task.id);
     render();
-  }));
+  }, !inline);
 }
 
 function emlDownloadButton(filename) {
